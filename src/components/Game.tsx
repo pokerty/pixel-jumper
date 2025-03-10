@@ -20,11 +20,11 @@ let gameSpeed = 1.0;
 
 // Define character skins
 const CHARACTER_SKINS = {
-  pink: { color: '#FFB6C1', image: '/src/assets/pink.png' },
-  blue: { color: '#87CEFA', image: '/src/assets/blue.png' },
-  green: { color: '#90EE90', image: '/src/assets/green.png' },
-  purple: { color: '#DDA0DD', image: '/src/assets/purple.png' },
-  orange: { color: '#FFA500', image: '/src/assets/orange.png' },
+  pink: { color: '#FFB6C1', image: '/pink.png' },
+  blue: { color: '#87CEFA', image: '/blue.png' },
+  green: { color: '#90EE90', image: '/green.png' },
+  purple: { color: '#DDA0DD', image: '/purple.png' },
+  orange: { color: '#FFA500', image: '/orange.png' },
 };
 
 const GOLDEN_COIN_SMALL = () => (
@@ -55,21 +55,21 @@ const GOLDEN_COIN_BIG = () => (
 
 // Add power-up asset mapping
 const POWERUP_IMAGES = {
-  jump_boost: '/src/assets/jump-boost.png',
-  slow_motion: '/src/assets/slow-motion.png',
-  // coin_magnet: '/src/assets/coin-magnet.jpg',
-  shield: '/src/assets/shield.png',
+  jump_boost: '/jump-boost.png',
+  slow_motion: '/slow-motion.png',
+  // coin_magnet: '/coin-magnet.jpg',
+  shield: '/shield.png',
 };
 
-const chosenBackground = '/src/assets/retro-background.jpg';
+const chosenBackground = '/retro-background.jpg';
 const AUDIO_ASSETS = {
   // Sound effects
-  jump: '/src/assets/jump.mp3',
-  coin: '/src/assets/coin.mp3',
-  powerUp: '/src/assets/power-up.mp3',
+  jump: '/jump.mp3',
+  coin: '/coin.mp3',
+  powerUp: '/power-up.mp3',
 };
-const menuMusic = new Audio('/src/assets/background-music.mp3');
-const gameMusic = new Audio('/src/assets/game-music.mp3');
+const menuMusic = new Audio('/background-music.mp3');
+const gameMusic = new Audio('/game-music.mp3');
 menuMusic.loop = true;
 gameMusic.loop = true;
 
@@ -706,7 +706,7 @@ export default function Game() {
               
               // Play combo sound with increasing volume
               if (!audioCache['combo']) {
-                audioCache['combo'] = new Audio('/src/assets/combo.mp3');
+                audioCache['combo'] = new Audio('/combo.mp3');
               }
               audioCache['combo'].volume = Math.min(0.8, 0.3 + (newCombo * 0.05));
               audioCache['combo'].currentTime = 0;
@@ -1380,7 +1380,7 @@ export default function Game() {
             <div>
               {/* Main Menu BG */}
               <img
-                src="/src/assets/main-menu.png"
+                src="/main-menu.png"
                 alt="Main Menu Background"
                 className="absolute"
                 style={{
