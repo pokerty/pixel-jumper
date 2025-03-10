@@ -508,7 +508,7 @@ export default function Game() {
       setSpeedMultiplier(gameSpeed * timeScale);
 
       // Add music speed adjustment
-      gameMusic.playbackRate = 0.4 * gameSpeed;
+      gameMusic.playbackRate = 0.8 * gameSpeed;
       
       // Calculate current speed with effects
       const currentSpeed = MOVE_SPEED * gameSpeed * timeScale;
