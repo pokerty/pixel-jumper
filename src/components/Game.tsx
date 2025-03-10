@@ -502,7 +502,7 @@ export default function Game() {
     
     const gameLoop = setInterval(() => {
       // Calculate game speed based on score
-      gameSpeed = Math.min(3.0, 1.0 + Math.floor(score / 5) * 0.1);
+      gameSpeed = Math.min(3.0, 1.0 + Math.floor(score / 500) * 0.1);
       // Fix slow motion effect
       let timeScale = player.activeEffects.slowMotion > 0 ? 0.5 : 1.0;
       setSpeedMultiplier(gameSpeed * timeScale);
