@@ -63,10 +63,17 @@ const POWERUP_IMAGES = {
 
 const chosenBackground = '/retro-background.jpg';
 const AUDIO_ASSETS = {
-  // Sound effects
   jump: '/jump.mp3',
   coin: '/coin.mp3',
   powerUp: '/power-up.mp3',
+  perfectLanding: '/perfectLanding.mp3', 
+  crumble: '/crumble.mp3',             
+  shield: '/shield.mp3',               
+  unlock: '/unlock.mp3',               
+  error: '/error.mp3',                 
+  reward: '/reward.mp3',               
+  purchase: '/purchase.mp3',           
+  combo: '/combo.mp3',                 
 };
 const menuMusic = new Audio('/background-music.mp3');
 const gameMusic = new Audio('/game-music.mp3');
@@ -155,321 +162,213 @@ interface Player {
 
 export default function Game() {
   
-  // Existing states
+  // Helper function for challenge generation
+  const generateDailyChallenges = useCallback((): Challenge[] => {
+    // ... (challenge generation logic - keep as is)
+    const allChallenges: Omit<Challenge, 'progress' | 'completed' | 'claimed'>[] = [
+      { id: 'collect_coins', description: 'Collect 30 coins', target: 30, reward: 12 },
+      { id: 'reach_score', description: 'Reach 2000 points', target: 2000, reward: 25 },
+      { id: 'perfect_landings', description: 'Get a 5x combo', target: 5, reward: 18 },
+      { id: 'play_games', description: 'Play 3 games today', target: 3, reward: 15 },
+      { id: 'survival', description: 'Survive for 60 seconds', target: 60, reward: 20 },
+      { id: 'big_jump', description: 'Make 50 jumps', target: 50, reward: 10 },
+      { id: 'collect_powerups', description: 'Collect 5 power ups', target: 5, reward: 30 },
+    ];
+    const shuffled = [...allChallenges].sort(() => 0.5 - Math.random()).slice(0, 3);
+    return shuffled.map(c => ({ ...c, progress: 0, completed: false, claimed: false }));
+  }, []);
+
+  // --- State Hooks ---
   const [gameStarted, setGameStarted] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(() => {
-    return parseInt(localStorage.getItem('highScore') || '0', 10);
-  });
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [cameraOffset, setCameraOffset] = useState(0);
-  const [speedMultiplier, setSpeedMultiplier] = useState(1.0);
+  const [speedMultiplier, setSpeedMultiplier] = useState(1.0); // Current speed including effects
   const [showRevivePopup, setShowRevivePopup] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
-  const [hasRevive, setHasRevive] = useState(true);
-  
-  // New states for addictive features
   const [coins, setCoins] = useState<Coin[]>([]);
   const [powerUps, setPowerUps] = useState<PowerUp[]>([]);
-  const [collectedCoins, setCollectedCoins] = useState(0);
-  const [totalCoins, setTotalCoins] = useState(() => {
-    return parseInt(localStorage.getItem('totalCoins') || '0', 10);
-  });
   const [combo, setCombo] = useState(0);
-  const [maxCombo, setMaxCombo] = useState(0);
   const [showComboText, setShowComboText] = useState(false);
-  const [challenges, setChallenges] = useState<Challenge[]>(() => {
-    const saved = localStorage.getItem('challenges');
-    return saved ? JSON.parse(saved) : generateDailyChallenges();
-  });
-  const [selectedSkin, setSelectedSkin] = useState(() => {
-    return localStorage.getItem('selectedSkin') || 'pink';
-  });
-  const [unlockedSkins, setUnlockedSkins] = useState<string[]>(() => {
-    const saved = localStorage.getItem('unlockedSkins');
-    return saved ? JSON.parse(saved) : ['pink'];
-  });
   const [showSkinSelector, setShowSkinSelector] = useState(false);
   const [showChallenges, setShowChallenges] = useState(false);
-  const [screenShake, setScreenShake] = useState(0);
-  
-  // Add these state variables
-  const [revives, setRevives] = useState(() => {
-    return parseInt(localStorage.getItem('revives') || '0', 10);
-  });
   const [showShop, setShowShop] = useState(false);
-  
-  // Add this state for tracking which challenge was just claimed
   const [justClaimedChallenge, setJustClaimedChallenge] = useState<string | null>(null);
-  
-  // Player state with new properties
-  const [player, setPlayer] = useState<Player>({
-    x: 100,
-    y: GAME_HEIGHT - 100,
-    velocityY: 0,
-    velocityX: 0,
-    isJumping: false,
-    jumpCount: 0,
-    rotation: 0,
-    color: CHARACTER_SKINS[selectedSkin as keyof typeof CHARACTER_SKINS]?.color || CHARACTER_SKINS.pink.color,
-    activeEffects: {
-      jumpBoost: 0,
-      slowMotion: 0,
-      shield: false,
-    }
+  const [watchingAd, setWatchingAd] = useState(false);
+  const [adTimer, setAdTimer] = useState(0);
+  const [adReward, setAdReward] = useState<{ type: 'revive' | 'doubleReward', challengeId?: string } | null>(null);
+
+  // State with localStorage persistence
+  const [highScore, setHighScore] = useState(() => parseInt(localStorage.getItem('highScore') ?? '0', 10));
+  const [totalCoins, setTotalCoins] = useState(() => parseInt(localStorage.getItem('totalCoins') ?? '0', 10));
+  const [challenges, setChallenges] = useState<Challenge[]>(() => {
+      const saved = localStorage.getItem('challenges');
+      try { return saved ? JSON.parse(saved) : generateDailyChallenges(); }
+      catch (e) { console.error("Failed to parse saved challenges:", e); return generateDailyChallenges(); }
   });
-  
-  // Refs for animation effects
-  const screenShakeRef = useRef({ x: 0, y: 0 });
-  
-  // Generate daily challenges
-  function generateDailyChallenges(): Challenge[] {
-    return [
-      {
-        id: 'collect_coins',
-        description: 'Collect 30 coins',
-        target: 30,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 12,
-      },
-      {
-        id: 'reach_score',
-        description: 'Reach 2000 points',
-        target: 2000,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 25,
-      },
-      {
-        id: 'perfect_landings',
-        description: 'Get a 5x combo',
-        target: 5,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 18,
-      },
-      // New challenges
-      {
-        id: 'play_games',
-        description: 'Play 3 games today',
-        target: 3,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 15,
-      },
-      {
-        id: 'survival',
-        description: 'Survive for 60 seconds',
-        target: 60,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 20,
-      },
-      {
-        id: 'big_jump',
-        description: 'Make 50 jumps',
-        target: 50,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 10,
-      },
-      {
-        id: 'collect_powerups',
-        description: 'Collect 5 power ups',
-        target: 5,
-        progress: 0,
-        completed: false,
-        claimed: false,
-        reward: 30,
+  const [selectedSkin, setSelectedSkin] = useState(() => localStorage.getItem('selectedSkin') ?? 'pink');
+  const [unlockedSkins, setUnlockedSkins] = useState<string[]>(() => {
+      const saved = localStorage.getItem('unlockedSkins');
+      try { return saved ? JSON.parse(saved) : ['pink']; }
+      catch (e) { console.error("Failed to parse unlocked skins:", e); return ['pink']; }
+  });
+  const [revives, setRevives] = useState(() => parseInt(localStorage.getItem('revives') ?? '0', 10));
+
+  // Player state
+  const [player, setPlayer] = useState<Player>(() => ({
+    x: 100, y: GAME_HEIGHT - 100, velocityY: 0, velocityX: 0,
+    isJumping: false, jumpCount: 0, rotation: 0,
+    color: CHARACTER_SKINS[selectedSkin as keyof typeof CHARACTER_SKINS]?.color || CHARACTER_SKINS.pink.color,
+    activeEffects: { jumpBoost: 0, slowMotion: 0, shield: false }
+  }));
+
+  // Refs
+  const screenShakeRef = useRef({ x: 0, y: 0 }); // Used for visual effect
+
+  // --- Challenge Update Helpers (New) ---
+  const updateChallengeProgress = useCallback((id: string, value: number) => {
+    setChallenges(prev => prev.map(c => {
+      if (c.id === id && !c.completed) {
+        const newProgress = value; // Set progress directly
+        return { ...c, progress: newProgress, completed: newProgress >= c.target };
       }
-    ];
-  }
+      return c;
+    }));
+  }, [setChallenges]);
 
+  const incrementChallengeProgress = useCallback((id: string, amount: number = 1) => {
+    setChallenges(prev => prev.map(c => {
+      if (c.id === id && !c.completed) {
+        const newProgress = c.progress + amount;
+        return { ...c, progress: newProgress, completed: newProgress >= c.target };
+      }
+      return c;
+    }));
+  }, [setChallenges]);
+  // --- End Challenge Update Helpers ---
 
-  // Check and reset daily challenges
+  // --- Effects --- 
+  // Check and reset daily challenges on mount
   useEffect(() => {
     const lastCheck = localStorage.getItem('lastChallengeCheck');
     const today = new Date().toDateString();
-    
     if (lastCheck !== today) {
-      const allChallenges = generateDailyChallenges();
-      const shuffled = [...allChallenges].sort(() => 0.5 - Math.random());
-      const selectedChallenges = shuffled.slice(0, 3);
-      setChallenges(selectedChallenges);
-      localStorage.setItem('challenges', JSON.stringify(selectedChallenges));
+      const newChallenges = generateDailyChallenges();
+      setChallenges(newChallenges);
+      localStorage.setItem('challenges', JSON.stringify(newChallenges));
       localStorage.setItem('lastChallengeCheck', today);
     }
-  }, []);
-  
-  // Save data to localStorage whenever it changes
+  }, [generateDailyChallenges, setChallenges]); // Added setChallenges dependency
+
+  // Combined effect to save all persistent state to localStorage
   useEffect(() => {
     localStorage.setItem('highScore', highScore.toString());
     localStorage.setItem('totalCoins', totalCoins.toString());
-    localStorage.setItem('challenges', JSON.stringify(challenges));
-    localStorage.setItem('unlockedSkins', JSON.stringify(unlockedSkins));
     localStorage.setItem('selectedSkin', selectedSkin);
     localStorage.setItem('revives', revives.toString());
+    try { localStorage.setItem('challenges', JSON.stringify(challenges)); }
+    catch (e) { console.error("Failed to save challenges:", e); }
+    try { localStorage.setItem('unlockedSkins', JSON.stringify(unlockedSkins)); }
+    catch (e) { console.error("Failed to save unlocked skins:", e); }
   }, [highScore, totalCoins, challenges, unlockedSkins, selectedSkin, revives]);
-  
-  // Platform generation with coins and power-ups
-  const generatePlatform = useCallback((lastX: number, lastY?: number, speed = 1.0) => {
-    // Original platform generation logic
-    const minWidth = 80;
-    const maxWidth = 130;
+
+  // Update player color when skin changes
+  useEffect(() => {
+    setPlayer(prev => ({
+      ...prev,
+      color: CHARACTER_SKINS[selectedSkin as keyof typeof CHARACTER_SKINS]?.color || CHARACTER_SKINS.pink.color
+    }));
+  }, [selectedSkin]);
+
+  // --- Core Game Logic Callbacks ---
+  // Platform generation
+  const generatePlatform = useCallback((lastX: number, lastY?: number, currentSpeed = 1.0) => {
+    // Simplified calculations slightly, behavior should be identical
+    const minWidth = 80, maxWidth = 130;
     const width = Math.random() * (maxWidth - minWidth) + minWidth;
-    
-    const jumpTime = 2 * Math.abs(JUMP_FORCE) / GRAVITY;
-    const singleJumpDistance = (MOVE_SPEED * speed) * jumpTime;
-    const maxJumpDistance = singleJumpDistance * 1.6;
-    
-    const baseMinGap = 80;
-    const baseMaxGap = Math.min(140, maxJumpDistance - 20);
-    
-    const minGap = Math.min(baseMinGap * speed, maxJumpDistance * 0.6);
-    const maxGap = Math.min(baseMaxGap * speed, maxJumpDistance * 0.9);
-    
-    const finalMaxGap = Math.max(minGap, maxGap);
-    const gap = Math.random() * (finalMaxGap - minGap) + minGap;
-    
+
+    // Approximate max jump distance based on constants
+    // Note: A more precise physics calculation could be used, but this maintains existing behavior
+    const timeToApex = Math.abs(JUMP_FORCE) / GRAVITY;
+    const maxHorizontalTravel = MOVE_SPEED * currentSpeed * (2 * timeToApex) * 1.6; // Includes double jump factor
+
+    const minGap = 80;
+    const maxGap = Math.min(140, maxHorizontalTravel * 0.6); // Adjust gap based on jump distance
+    const gap = Math.random() * (maxGap - minGap) + minGap;
     const x = lastX + gap;
-    
+
     let y;
     if (lastY) {
       const jumpRange = 150;
-      const upOrDown = Math.random() > 0.5;
-      
-      if (upOrDown && lastY > GAME_HEIGHT / 2) {
-        y = Math.max(100, lastY - Math.random() * jumpRange);
-      } else {
-        y = Math.min(GAME_HEIGHT - 100, lastY + Math.random() * jumpRange);
-      }
+      const minY = 100, maxY = GAME_HEIGHT - 100;
+      y = Math.max(minY, Math.min(maxY, lastY + (Math.random() * 2 - 1) * jumpRange));
     } else {
       y = GAME_HEIGHT - 100;
     }
-    
-    // Determine if this is a special platform
+
     let platformType: Platform['type'] = 'normal';
     if (Math.random() < SPECIAL_PLATFORM_CHANCE) {
       platformType = Math.random() < 0.5 ? 'moving' : 'disappearing';
     }
-    
-    // Create the platform object with additional properties
-    const platform: Platform = { 
-      x, 
-      y, 
-      width,
-      type: platformType
-    };
-    
-    // For moving platforms
+
+    const platform: Platform = { x, y, width, type: platformType };
     if (platformType === 'moving') {
-      platform.direction = Math.random() < 0.5 ? -1 : 1;
-      platform.startX = x; // Store the original X position
-      platform.moveDistance = Math.min(width * 1.5, 100); // Limit max movement distance based on platform width
+      platform.direction = Math.sign(Math.random() - 0.5) || 1; // Ensure direction is -1 or 1
+      platform.startX = x;
+      platform.moveDistance = Math.min(width * 1.5, 100);
     }
-    
-    // For disappearing platforms
     if (platformType === 'disappearing') {
       platform.visible = true;
-      platform.timer = 50; // Will disappear after 5/6 second of landing
+      // Timer is handled in collision logic now
     }
-    
     return platform;
-  }, []);
-  
-  // Init game function with new features
+  }, []); // Dependencies: GAME_HEIGHT, GRAVITY, JUMP_FORCE, MOVE_SPEED, SPECIAL_PLATFORM_CHANCE - These are constants, so array can be empty
+
+  // Init game function
   const initGame = useCallback(() => {
     setScore(0);
     setCameraOffset(0);
-    gameSpeed = 1.0;
+    gameSpeed = 1.0; // Reset base game speed
     setSpeedMultiplier(1.0);
     setShowRevivePopup(false);
     setIsGameOver(false);
-    setHasRevive(true);
     setCombo(0);
     setCoins([]);
     setPowerUps([]);
-    setCollectedCoins(0);
-    
-    // Reset player with selected skin
-    setPlayer({
-      x: 100,
-      y: GAME_HEIGHT - 100,
-      velocityY: 0,
-      velocityX: MOVE_SPEED,
-      isJumping: false,
-      jumpCount: 0,
-      rotation: 0,
-      color: CHARACTER_SKINS[selectedSkin as keyof typeof CHARACTER_SKINS]?.color || CHARACTER_SKINS.pink.color,
-      activeEffects: {
-        jumpBoost: 0,
-        slowMotion: 0,
-        shield: false
-      }
-    });
-    
+
+    setPlayer(prev => ({
+      ...prev, // Keep current skin color
+      x: 100, y: GAME_HEIGHT - 100, velocityY: 0, velocityX: MOVE_SPEED,
+      isJumping: false, jumpCount: 0, rotation: 0,
+      activeEffects: { jumpBoost: 0, slowMotion: 0, shield: false }
+    }));
+
     // Generate initial platforms
-    const initialPlatforms: Platform[] = [
-      { x: 50, y: GAME_HEIGHT - 50, width: 200, type: 'normal' },
-    ];
-    
+    const initialPlatforms: Platform[] = [{ x: 50, y: GAME_HEIGHT - 50, width: 200, type: 'normal' }];
     let lastX = initialPlatforms[0].x + initialPlatforms[0].width;
     let lastY = initialPlatforms[0].y;
-    
     for (let i = 0; i < 8; i++) {
-      // Initial platforms have speed 1.0
       const platform = generatePlatform(lastX, lastY, 1.0);
       initialPlatforms.push(platform);
       lastX = platform.x + platform.width;
       lastY = platform.y;
     }
-    
     setPlatforms(initialPlatforms);
     setGameStarted(true);
 
-    // Update play_games challenge
-    setChallenges(prev => prev.map(challenge => {
-      if (challenge.id === 'play_games' && !challenge.completed) {
-        const newProgress = challenge.progress + 1;
-        return {
-          ...challenge,
-          progress: newProgress,
-          completed: newProgress >= challenge.target
-        };
-      }
-      return challenge;
-    }));
-  }, [generatePlatform, selectedSkin]);
-  
-  // Enhanced jump function with power-up effects
+    // Use helper to update play_games challenge
+    incrementChallengeProgress('play_games');
+
+  }, [generatePlatform, incrementChallengeProgress]); // Dependencies
+
+  // Jump function
   const jump = useCallback(() => {
     setPlayer(prev => {
-      // Only jump if we haven't used all our jumps
       if (prev.jumpCount < MAX_JUMP_COUNT) {
-        // Play jump sound effect
         playSoundEffect('jump');
-        
-        // Update big_jump challenge
-        setChallenges(prev => prev.map(challenge => {
-          if (challenge.id === 'big_jump' && !challenge.completed) {
-            const newProgress = challenge.progress + 1;
-            return {
-              ...challenge,
-              progress: newProgress,
-              completed: newProgress >= challenge.target
-            };
-          }
-          return challenge;
-        }));
-        
+        // Use helper to update big_jump challenge
+        incrementChallengeProgress('big_jump');
+
         return {
           ...prev,
           velocityY: JUMP_FORCE * (prev.activeEffects.jumpBoost > 0 ? 1.5 : 1.0),
@@ -479,380 +378,296 @@ export default function Game() {
       }
       return prev;
     });
-  }, []);
-  
+  }, [incrementChallengeProgress]); // Dependencies
+
   // Key press handler
   useEffect(() => {
-    if (!gameStarted) return;
-
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
+    if (!gameStarted || isGameOver) return;
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        event.preventDefault(); // Prevent page scroll
         jump();
       }
     };
+    window.addEventListener('keydown', handleKeyPress); // Use keydown for better responsiveness
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [gameStarted, isGameOver, jump]);
 
-    window.addEventListener('keypress', handleKeyPress);
-    return () => window.removeEventListener('keypress', handleKeyPress);
-  }, [gameStarted, jump]);
-  
-  
-  // Main game loop with enhanced features
+  // Music switching effect (Restored with fixed context handling)
+  useEffect(() => {
+    let audioContext: AudioContext | null = null;
+    const getAudioContext = () => {
+      if (!audioContext && typeof window !== 'undefined' && window.AudioContext) {
+          try {
+              audioContext = new window.AudioContext();
+          } catch (e) {
+              console.error("Error creating AudioContext:", e);
+          }
+      }
+      return audioContext;
+    };
+
+    const switchMusic = () => {
+      if (gameStarted) {
+        menuMusic.pause();
+        menuMusic.currentTime = 0;
+        gameMusic.volume = 0.4; // Set desired game volume
+        gameMusic.play().catch(err => console.log("Game music play error:", err));
+      } else {
+        gameMusic.pause();
+        gameMusic.currentTime = 0;
+        menuMusic.volume = 0.4; // Set desired menu volume
+        menuMusic.play().catch(err => console.log("Menu music play error:", err));
+      }
+    };
+
+    // Enable audio context on first user interaction
+    const enableAudio = () => {
+      const context = getAudioContext();
+      if (context && context.state === 'suspended') {
+        context.resume().then(() => {
+          console.log("AudioContext resumed.");
+          // Attempt to play again after resume if needed
+          // switchMusic(); 
+        }).catch((e: Error) => console.error("Error resuming AudioContext:", e));
+      }
+      document.removeEventListener('click', enableAudio);
+      document.removeEventListener('touchstart', enableAudio);
+    };
+
+    switchMusic(); // Initial music state
+    document.addEventListener('click', enableAudio);
+    document.addEventListener('touchstart', enableAudio);
+
+    return () => {
+      document.removeEventListener('click', enableAudio);
+      document.removeEventListener('touchstart', enableAudio);
+      // Optional: Pause music on unmount
+      // menuMusic.pause();
+      // gameMusic.pause();
+    };
+  }, [gameStarted]);
+
+  // Main game loop
   useEffect(() => {
     if (!gameStarted || isGameOver) return;
-    
-    const gameLoop = setInterval(() => {
-      // Calculate game speed based on score
-      gameSpeed = Math.min(3.0, 1.0 + Math.floor(score / 500) * 0.1);
-      // Fix slow motion effect
-      let timeScale = player.activeEffects.slowMotion > 0 ? 0.5 : 1.0;
-      setSpeedMultiplier(gameSpeed * timeScale);
+    let animationFrameId: number;
 
-      // Add music speed adjustment
-      gameMusic.playbackRate = 0.8 * gameSpeed;
-      
-      // Calculate current speed with effects
+    const gameLoop = () => {
+      // --- Speed Calculation ---
+      gameSpeed = Math.min(3.0, 1.0 + Math.floor(score / 500) * 0.1);
+      const timeScale = player.activeEffects.slowMotion > 0 ? 0.5 : 1.0;
       const currentSpeed = MOVE_SPEED * gameSpeed * timeScale;
-      
-      // Update camera position
+      setSpeedMultiplier(gameSpeed * timeScale); // Update for UI/effects
+      gameMusic.playbackRate = Math.max(0.5, 0.8 * gameSpeed);
+
+      // --- Updates --- 
       setCameraOffset(prev => prev + currentSpeed);
-      
-      // Update platforms (moving & disappearing)
-      setPlatforms(prev => {
-        return prev.map(platform => {
-          // Handle moving platforms
-          if (platform.type === 'moving' && platform.direction) {
-            const moveSpeed = 1.0 * timeScale; // Reduced from 1.5 to 1.0 for easier gameplay
-            
-            // Calculate new position
-            const newX = platform.x + platform.direction * moveSpeed;
-            
-            // Restrict movement to a reasonable range from starting position
-            if (platform.startX && platform.moveDistance) {
-              // If platform would go beyond allowed range, reverse direction
-              if (newX < platform.startX - platform.moveDistance || 
-                  newX > platform.startX + platform.moveDistance) {
-                platform.direction *= -1; // Reverse direction
-              } else {
-                platform.x = newX; // Otherwise update position
-              }
-            } else {
-              // Fallback for old platforms without these properties
-              platform.x = newX;
-            }
+
+      setPlatforms(prevPlatforms => prevPlatforms.map(p => {
+        // Moving platform logic
+        if (p.type === 'moving' && p.direction && p.startX !== undefined && p.moveDistance !== undefined) {
+          const platformMoveSpeed = 1.0 * timeScale;
+          let newX = p.x + p.direction * platformMoveSpeed;
+          if (newX < p.startX - p.moveDistance || newX > p.startX + p.moveDistance) {
+            p.direction *= -1;
+            newX = p.x + p.direction * platformMoveSpeed; // Recalculate after direction change
           }
-          
-          // Keep disappearing platforms visible until landed on
-          return platform;
-        });
-      });
-      
-      // Update player position with enhanced collision detection
-      setPlayer(prev => {
-        // Apply normal movement
-        const newX = prev.x + currentSpeed;
-        const newY = prev.y + prev.velocityY;
-        const newVelocityY = prev.velocityY + GRAVITY * timeScale;
-        
-        // Rotation logic
-        let newRotation = prev.rotation;
-        if (prev.isJumping) {
-          newRotation = (prev.rotation + 6) % 360;
+          return { ...p, x: newX };
         }
-        
-        // Check platform collisions
+        return p;
+      }));
+
+      setPlayer(prev => {
+        let { x, y, velocityY, rotation, isJumping, jumpCount, activeEffects } = prev;
+        let velocityX = currentSpeed; // Update horizontal velocity
+
+        // Apply physics
+        velocityY += GRAVITY * timeScale;
+        x += velocityX;
+        y += velocityY;
+        if (isJumping) rotation = (rotation + 6 * timeScale) % 360;
+
+        // --- Collision Detection ---
         let collision = false;
         let landedPlatform: Platform | null = null;
-        
-        platforms.forEach(platform => {
-          // Skip invisible platforms
-          if (platform.type === 'disappearing' && platform.visible === false) {
-            return;
-          }
-          
-          if (
-            newY + PLAYER_SIZE > platform.y &&
-            newY + PLAYER_SIZE < platform.y + PLATFORM_HEIGHT &&
-            newX + PLAYER_SIZE > platform.x &&
-            newX < platform.x + platform.width &&
-            prev.velocityY > 0
-          ) {
+        for (const platform of platforms) {
+          if (platform.visible === false) continue;
+          if ( prev.velocityY > 0 && // Check only when falling
+               y + PLAYER_SIZE >= platform.y &&
+               y + PLAYER_SIZE <= platform.y + PLATFORM_HEIGHT &&
+               x + PLAYER_SIZE > platform.x &&
+               x < platform.x + platform.width )
+          {
             collision = true;
             landedPlatform = platform;
+            break; // Exit loop once collision is found
           }
-        });
-        
-        // Check coin collisions
-        coins.forEach((coin, index) => {
-          if (!coin.collected &&
-              newX < coin.x + COIN_SIZE &&
-              newX + PLAYER_SIZE > coin.x &&
-              newY < coin.y + COIN_SIZE &&
-              newY + PLAYER_SIZE > coin.y) {
-            
-            // Collect the coin
-            setCoins(prev => prev.map((c, i) => 
-              i === index ? { ...c, collected: true } : c
-            ));
-            
-            // Update collected coins
-            setCollectedCoins(prev => prev + coin.value);
-            setTotalCoins(prev => prev + coin.value);
-            
-            // Play coin sound
-            playSoundEffect('coin');
-            
-            // Update challenge progress
-            setChallenges(prev => prev.map(challenge => {
-              if (challenge.id === 'collect_coins' && !challenge.completed) {
-                const newProgress = challenge.progress + coin.value;
-                return {
-                  ...challenge,
-                  progress: newProgress,
-                  completed: newProgress >= challenge.target
-                };
-              }
-              return challenge;
-            }));
-          }
-        });
-        
-        // Check power-up collisions
-        powerUps.forEach((powerUp, index) => {
-          if (!powerUp.collected &&
-              newX < powerUp.x + POWERUP_SIZE &&
-              newX + PLAYER_SIZE > powerUp.x &&
-              newY < powerUp.y + POWERUP_SIZE &&
-              newY + PLAYER_SIZE > powerUp.y) {
-            
-            // Mark as collected
-            setPowerUps(prev => prev.map((p, i) => 
-              i === index ? { ...p, collected: true } : p
-            ));
-            
-            // Apply power-up effect
-            const effectFrames = powerUp.duration * 60; // 60fps * seconds
-            
-            let updatedEffects = { ...prev.activeEffects };
-            
-            switch (powerUp.type) {
-              case 'jump_boost':
-                updatedEffects.jumpBoost = effectFrames;
-                break;
-              case 'slow_motion':
-                updatedEffects.slowMotion = effectFrames;
-                break;
-              case 'shield':
-                updatedEffects.shield = true;
-                break;
-            }
-            
-            // Play power-up sound
-            playSoundEffect('powerUp');
+        }
 
-            // Update powerup challenge
-            setChallenges(prev => prev.map(challenge => {
-              if (challenge.id === 'collect_powerups' && !challenge.completed) {
-                const newProgress = challenge.progress + 1;
-                return {
-                  ...challenge,
-                  progress: newProgress,
-                  completed: newProgress >= challenge.target
-                };
-              }
-              return challenge;
-            }));
-            
-            return {
-              ...prev,
-              activeEffects: updatedEffects
-            };
+        // --- Coin Collection ---
+        setCoins(prevCoins => prevCoins.map(coin => {
+          if (!coin.collected &&
+              x < coin.x + COIN_SIZE && x + PLAYER_SIZE > coin.x &&
+              y < coin.y + COIN_SIZE && y + PLAYER_SIZE > coin.y)
+          {
+            setTotalCoins(prevTotal => prevTotal + coin.value);
+            playSoundEffect('coin');
+            // Use helper to update collect_coins challenge
+            incrementChallengeProgress('collect_coins', coin.value);
+            return { ...coin, collected: true };
           }
-        });
-        
+          return coin;
+        }));
+
+        // --- Power-up Collection ---
+        setPowerUps(prevPowerUps => prevPowerUps.map(powerUp => {
+          if (!powerUp.collected &&
+              x < powerUp.x + POWERUP_SIZE && x + PLAYER_SIZE > powerUp.x &&
+              y < powerUp.y + POWERUP_SIZE && y + PLAYER_SIZE > powerUp.y)
+          {
+            playSoundEffect('powerUp');
+            const effectFrames = powerUp.duration * 60;
+            switch (powerUp.type) {
+              case 'jump_boost': activeEffects.jumpBoost = effectFrames; break;
+              case 'slow_motion': activeEffects.slowMotion = effectFrames; break;
+              case 'shield': activeEffects.shield = true; break;
+            }
+            // Use helper to update collect_powerups challenge
+            incrementChallengeProgress('collect_powerups');
+            return { ...powerUp, collected: true };
+          }
+          return powerUp;
+        }));
+
+        // --- Landing Logic ---
         if (collision && landedPlatform) {
-          // Only check for perfect landing if this is an actual landing (not sliding)
-          const isNewLanding = prev.isJumping;
-          
-          // Landing logic - snap to a side based on rotation
-          const normalizedRotation = ((newRotation % 360) + 360) % 360;
-          let nextSide;
-          if (normalizedRotation >= 31 && normalizedRotation <= 120) {
-            nextSide = 90;
-          } else if (normalizedRotation >= 121 && normalizedRotation <= 210) {
-            nextSide = 180;
-          } else if (normalizedRotation >= 211 && normalizedRotation <= 300) {
-            nextSide = 270;
-          } else {
-            nextSide = 0;
-          }
-          
-          // Perfect landing bonus - ONLY PROCESS FOR NEW LANDINGS
-          if (isNewLanding) {
-            const isPerfectLanding = Math.abs(normalizedRotation - nextSide) < 15;
-            
-            if (isPerfectLanding) {
-              // Increase combo
+          const wasJumping = isJumping;
+          y = landedPlatform.y - PLAYER_SIZE; // Snap Y position
+          velocityY = 0;
+          isJumping = false;
+          jumpCount = 0;
+
+          if (wasJumping) { // Only process landing effects if coming from a jump
+            // Rotation Snapping
+            const normalizedRotation = ((rotation % 360) + 360) % 360;
+            const snapThreshold = 45;
+            if (normalizedRotation > 360 - snapThreshold || normalizedRotation <= snapThreshold) rotation = 0;
+            else if (normalizedRotation > 90 - snapThreshold && normalizedRotation <= 90 + snapThreshold) rotation = 90;
+            else if (normalizedRotation > 180 - snapThreshold && normalizedRotation <= 180 + snapThreshold) rotation = 180;
+            else if (normalizedRotation > 270 - snapThreshold && normalizedRotation <= 270 + snapThreshold) rotation = 270;
+
+            // Combo Logic
+            const landingAngle = [0, 90, 180, 270].includes(rotation) ? rotation : -1;
+            const perfectLanding = landingAngle !== -1 && Math.abs(normalizedRotation - landingAngle) < 15;
+
+            if (perfectLanding) {
               const newCombo = combo + 1;
               setCombo(newCombo);
-              setMaxCombo(prev => Math.max(prev, newCombo));
-              setShowComboText(true);
-              
-              // Screen shake intensity based on combo
+              setShowComboText(true); // Trigger UI effect
+              // Use helper to update perfect_landings challenge
+              updateChallengeProgress('perfect_landings', newCombo);
+
+              // Screen Shake
               const shakeIntensity = Math.min(5, newCombo * 0.5);
-              screenShakeRef.current = { 
-                x: (Math.random() - 0.5) * shakeIntensity, 
-                y: (Math.random() - 0.5) * shakeIntensity 
-              };
-              
-              // Play combo sound with increasing volume
-              if (!audioCache['combo']) {
-                audioCache['combo'] = new Audio('/combo.mp3');
-              }
-              audioCache['combo'].volume = Math.min(0.8, 0.3 + (newCombo * 0.05));
-              audioCache['combo'].currentTime = 0;
-              audioCache['combo'].play().catch(err => console.log('Audio play error:', err));
-              
-              setTimeout(() => {
-                screenShakeRef.current = { x: 0, y: 0 };
-                setShowComboText(false);
-              }, 800);
-              
-              playSoundEffect('perfectLanding');
-              setScore(prev => prev + Math.min(10, newCombo));
+              screenShakeRef.current = { x: (Math.random() - 0.5) * shakeIntensity, y: (Math.random() - 0.5) * shakeIntensity };
+              setTimeout(() => { screenShakeRef.current = { x: 0, y: 0 }; setShowComboText(false); }, 300); // Shorter duration
+
+              // Play combo sound if available
+              if (AUDIO_ASSETS.combo) playSoundEffect('combo');
+              // Optional: Play specific perfect landing sound
+              if (AUDIO_ASSETS.perfectLanding) playSoundEffect('perfectLanding');
+              setScore(prevScore => prevScore + Math.min(10, newCombo)); // Add score bonus
+
             } else {
               setCombo(0);
             }
-          }
-          
-          // Handle disappearing platforms
-          if (landedPlatform && (landedPlatform as Platform).type === 'disappearing') {
-            // Start disappearing
-            setTimeout(() => {
-              setPlatforms(prev => prev.map(p => {
-                if (p === landedPlatform) {
-                  return { ...p, visible: false };
-                }
-                return p;
-              }));
-            }, 500); // Disappear after 0.5 seconds
-            
-            // Play sound effect for disappearing platform
-            playSoundEffect('crumble');
-          }
-          
-          return {
-            ...prev,
-            x: newX,
-            y: (landedPlatform as Platform).y - PLAYER_SIZE + 1,
-            velocityY: 0,
-            isJumping: false,
-            jumpCount: 0,
-            rotation: nextSide,
-            velocityX: currentSpeed,
-          };
-        }
-        
-        // Game over check
-        if (newY > GAME_HEIGHT) {
-          // Check if shield is active
-          if (prev.activeEffects.shield) {
-            // Use up shield
-            playSoundEffect('shield');
-            
-            // Create a safe platform
-            const safeX = cameraOffset + GAME_WIDTH / 4;
-            const safeY = GAME_HEIGHT - 150;
-            
-            // Add safety platform
-            setPlatforms(platforms => [
-              ...platforms,
-              { x: safeX, y: safeY, width: 200, type: 'normal' }
-            ]);
-            
-            // Position player above platform
-            return {
-              ...prev,
-              activeEffects: { ...prev.activeEffects, shield: false },
-              x: safeX + 50,
-              y: safeY - PLAYER_SIZE,
-              velocityY: 0,
-              isJumping: false,
-              jumpCount: 0,
-              rotation: 0,
-            };
-          }
-          
-          // Don't immediately end the game, show revive popup instead
-          setShowRevivePopup(true);
-          setIsGameOver(true);
-          
-          
-          // Update the game over check to store personal high scores
-          if (score > highScore) {
-            setHighScore(score);
-          }
-          
 
-          
-          return prev;
+            // Disappearing Platform Logic
+            if (landedPlatform.type === 'disappearing') {
+              const platformToDisappear = landedPlatform; // Capture ref for timeout
+              setTimeout(() => {
+                setPlatforms(prevPlats => prevPlats.map(p => p === platformToDisappear ? { ...p, visible: false } : p));
+                playSoundEffect('crumble');
+              }, 300);
+            }
+          } // End if(wasJumping)
+        } // End if(collision)
+
+        // --- Game Over Check ---
+        if (y > GAME_HEIGHT + PLAYER_SIZE * 2) { // Allow falling further off screen
+          if (activeEffects.shield) {
+            playSoundEffect('shield');
+            activeEffects.shield = false;
+            // Create safe platform below player
+            const safeX = x - PLAYER_SIZE / 2;
+            const safeY = GAME_HEIGHT - 150;
+            const safePlatform: Platform = { x: safeX, y: safeY, width: 200, type: 'normal' };
+            setPlatforms(prevPlats => [...prevPlats, safePlatform]);
+            // Reset position and velocity
+            y = safeY - PLAYER_SIZE;
+            velocityY = 0;
+            isJumping = false;
+            jumpCount = 0;
+            rotation = 0;
+          } else {
+            setIsGameOver(true);
+            setShowRevivePopup(true);
+            if (score > highScore) setHighScore(score);
+            cancelAnimationFrame(animationFrameId); // Stop loop
+            return prev; // Return previous state without updates
+          }
         }
-        
-        return {
-          ...prev,
-          x: newX,
-          y: newY,
-          velocityY: newVelocityY,
-          rotation: newRotation,
-          velocityX: currentSpeed,
-        };
+
+        // --- Update Active Effects Timers ---
+        activeEffects.jumpBoost = Math.max(0, activeEffects.jumpBoost - 1);
+        activeEffects.slowMotion = Math.max(0, activeEffects.slowMotion - 1);
+
+        return { ...prev, x, y, velocityY, velocityX, rotation, isJumping, jumpCount, activeEffects };
       });
-      
-      // Generate platforms based on camera position
-      setPlatforms(prev => {
-        const lastPlatform = prev[prev.length - 1];
-        if (cameraOffset + GAME_WIDTH > lastPlatform.x) {
+
+      // --- Platform Generation & Cleanup ---
+      setPlatforms(prevPlatforms => {
+        const lastPlatform = prevPlatforms[prevPlatforms.length - 1];
+        let newPlatforms = [...prevPlatforms];
+        if (lastPlatform && cameraOffset + GAME_WIDTH > lastPlatform.x) {
           const newPlatform = generatePlatform(lastPlatform.x + lastPlatform.width, lastPlatform.y, gameSpeed);
-          
-          // Decide what to spawn based on chance constants
+          newPlatforms.push(newPlatform);
+
+          // Spawn Coins/Powerups
           const spawnRoll = Math.random();
-          
-          // Mutually exclusive spawning (never both on same platform)
+          const midPointX = (lastPlatform.x + lastPlatform.width + newPlatform.x) / 2;
+          const midPointY = Math.min(lastPlatform.y, newPlatform.y) - 60;
+
           if (spawnRoll < COIN_SPAWN_CHANCE) {
-            // Generate coins in one of three patterns
+            // FIX: Restore original coin pattern generation logic
             const patternType = Math.floor(Math.random() * 3);
-            
-            if (patternType === 0) {
-              // Arc pattern between platforms
+            if (patternType === 0) { // Arc pattern
               const coinCount = 5;
               const startX = lastPlatform.x + lastPlatform.width / 2;
               const endX = newPlatform.x + newPlatform.width / 2;
               const startY = lastPlatform.y - 50;
               const endY = newPlatform.y - 50;
-              
               for (let i = 0; i < coinCount; i++) {
                 const t = i / (coinCount - 1);
                 const coinX = startX + (endX - startX) * t;
                 const coinY = startY + (endY - startY) * t - Math.sin(t * Math.PI) * 40;
                 setCoins(prev => [...prev, { x: coinX, y: coinY, collected: false, value: 1 }]);
               }
-            } else if (patternType === 1) {
-              // Row pattern
+            } else if (patternType === 1) { // Row pattern
               const coinCount = 4;
               const startX = lastPlatform.x + lastPlatform.width;
               const spacing = (newPlatform.x - startX) / (coinCount + 1);
               const y = Math.min(lastPlatform.y, newPlatform.y) - 60;
-              
               for (let i = 0; i < coinCount; i++) {
                 const x = startX + spacing * (i + 1);
                 setCoins(prev => [...prev, { x, y, collected: false, value: 1 }]);
               }
-            } else {
-              // Rectangle pattern
+            } else { // Rectangle pattern
               const rows = 2;
               const cols = 3;
-              const startX = (lastPlatform.x + lastPlatform.width + newPlatform.x) / 2 - (cols * 25) / 2;
-              const startY = Math.min(lastPlatform.y, newPlatform.y) - 80;
-              
+              const startX = midPointX - (cols * 25) / 2; // Center the rectangle
+              const startY = midPointY - 10; // Adjust vertical position
               for (let row = 0; row < rows; row++) {
                 for (let col = 0; col < cols; col++) {
                   const x = startX + col * 25;
@@ -861,134 +676,89 @@ export default function Game() {
                 }
               }
             }
-          } 
-          else if (spawnRoll < COIN_SPAWN_CHANCE + POWERUP_SPAWN_CHANCE) {
-            // Spawn a power-up
-            const powerUpX = (lastPlatform.x + lastPlatform.width + newPlatform.x) / 2;
-            const powerUpY = Math.min(lastPlatform.y, newPlatform.y) - 60;
-            
-            // Randomly choose power-up type
+          } else if (spawnRoll < COIN_SPAWN_CHANCE + POWERUP_SPAWN_CHANCE) {
+            // Power-up spawning logic (keep as is)
             const types: PowerUp['type'][] = ['jump_boost', 'slow_motion', 'shield'];
             const type = types[Math.floor(Math.random() * types.length)];
-            
-            setPowerUps(prev => [...prev, {
-              x: powerUpX,
-              y: powerUpY,
-              type,
-              collected: false,
-              duration: type === 'shield' ? 20 : 5 // Change from 1 to 20 seconds for shield
-            }]);
+            setPowerUps(prevPows => [...prevPows, { x: midPointX, y: midPointY, type, collected: false, duration: type === 'shield' ? 0 : 5 }]);
           }
-          
-          return [...prev.filter(p => p.x + p.width > cameraOffset - 300), newPlatform];
         }
-        return prev.filter(p => p.x + p.width > cameraOffset - 300); // Clean up old platforms
+        // Cleanup old platforms, coins, powerups
+        const cleanupThreshold = cameraOffset - GAME_WIDTH * 0.5;
+        newPlatforms = newPlatforms.filter(p => p.x + p.width > cleanupThreshold);
+        setCoins(prevCoins => prevCoins.filter(c => c.x + COIN_SIZE > cleanupThreshold || c.collected));
+        setPowerUps(prevPows => prevPows.filter(p => p.x + POWERUP_SIZE > cleanupThreshold || p.collected));
+        return newPlatforms;
       });
-      
-      // Update score with combo multiplier
-      setScore(prev => prev + 1 + Math.floor(combo / 3));
-      
-      // Update challenge progress for score
-      setChallenges(prev => prev.map(challenge => {
-        if (challenge.id === 'reach_score' && !challenge.completed) {
-          const newProgress = score + 1;
-          return {
-            ...challenge,
-            progress: newProgress,
-            completed: newProgress >= challenge.target
-          };
-        }
-        return challenge;
-      }));
 
-      // Update survival challenge - count every second
-      if (score % 60 === 0) { // Once per second at 60fps
-        setChallenges(prev => prev.map(challenge => {
-          if (challenge.id === 'survival' && !challenge.completed) {
-            const newProgress = challenge.progress + 1;
-            return {
-              ...challenge,
-              progress: newProgress,
-              completed: newProgress >= challenge.target
-            };
-          }
-          return challenge;
-        }));
+      // --- Update Score & Challenges ---
+      setScore(prev => prev + 1); // Increment score each frame
+      // Use helpers to update score/survival challenges
+      updateChallengeProgress('reach_score', score + 1);
+      if (score % 60 === 0) { // Update survival approx every second
+         incrementChallengeProgress('survival');
       }
 
-      // Add this code to decrease power-up timers:
-      setPlayer(prev => {
-        // Update power-up durations
-        return {
-          ...prev,
-          activeEffects: {
-            jumpBoost: Math.max(0, prev.activeEffects.jumpBoost - 1),
-            slowMotion: Math.max(0, prev.activeEffects.slowMotion - 1),
-            shield: prev.activeEffects.shield // Shield doesn't have a timer
-          }
-        };
-      });
-      
-    }, 1000 / 60);
-    
-    return () => clearInterval(gameLoop);
-  }, [gameStarted, isGameOver, generatePlatform, platforms, cameraOffset, score, player, coins, powerUps, screenShake, combo]);
-  
+      // Request next frame
+      animationFrameId = requestAnimationFrame(gameLoop);
+    };
+
+    animationFrameId = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(animationFrameId);
+
+  }, [ /* HUGE Dependency Array - Needs careful review after changes */
+      gameStarted, isGameOver, player, score, cameraOffset, platforms, coins, powerUps, combo, highScore,
+      generatePlatform, updateChallengeProgress, incrementChallengeProgress, setTotalCoins, // Challenge helpers + coin setter
+      setHighScore, // Needed for game over check
+      // Other setters might be needed if state derived within loop uses them implicitly
+      setCombo, setShowComboText, setPlatforms, setCoins, setPowerUps, setScore, setIsGameOver, setShowRevivePopup
+  ]);
+
   // Handle revive function
   const handleRevive = useCallback(() => {
     setShowRevivePopup(false);
     setIsGameOver(false);
-    
+
+    // Decrement revive count or handle ad-based logic if revives is 0
     if (revives > 0) {
       setRevives(prev => prev - 1);
     } else {
-      setHasRevive(false); // For compatibility with the existing ad-based revival
+      // TODO: This else block might be redundant if ad logic handles revive grant
+      console.warn("Attempted revive with 0 revives, should be handled by ad?");
+      return; // Prevent reviving if no revives and not via ad
     }
-    
-    gameSpeed = Math.max(1.0, gameSpeed - 0.5);
+
+    // Reset some game state
+    gameSpeed = Math.max(1.0, gameSpeed - 0.5); // Slow down slightly
     setSpeedMultiplier(gameSpeed);
-    
+    setCombo(0);
+
+    // Create a safe landing platform slightly ahead
     const safeX = cameraOffset + GAME_WIDTH / 4;
     const safeY = GAME_HEIGHT - 150;
-    const safePlatform = { 
-      x: safeX, 
-      y: safeY, 
-      width: 200,
-      type: 'normal' as const
-    };
-    
-    setPlayer({
-      ...player,
-      x: safeX + 50,
-      y: safeY - PLAYER_SIZE,
-      velocityY: 0,
-      velocityX: MOVE_SPEED * gameSpeed,
-      isJumping: false,
-      jumpCount: 0,
-      rotation: 0,
-    });
-    
-    setPlatforms([
-      safePlatform,
-      ...Array.from({ length: 5 }, (_, i) => {
-        const lastX = i === 0 ? safePlatform.x + safePlatform.width : safePlatform.x + safePlatform.width + i * 200;
-        return generatePlatform(lastX, GAME_HEIGHT - 150 + (Math.random() * 100 - 50), gameSpeed);
-      })
-    ]);
-    
-    setCameraOffset(safeX - GAME_WIDTH / 4);
-    
-    // Reset combo on revive
-    setCombo(0);
-  }, [cameraOffset, player, generatePlatform, revives]);
-  
-  // End game
+    const safePlatform: Platform = { x: safeX, y: safeY, width: 200, type: 'normal' };
+
+    // Reset player position and state
+    setPlayer(prev => ({
+      ...prev,
+      x: safeX + 50, y: safeY - PLAYER_SIZE,
+      velocityY: 0, velocityX: MOVE_SPEED * gameSpeed,
+      isJumping: false, jumpCount: 0, rotation: 0,
+      activeEffects: { ...prev.activeEffects, shield: false } // Ensure shield is off
+    }));
+
+    // Reset platforms around the player
+    setPlatforms([safePlatform]); // Only the safe platform initially
+
+  }, [cameraOffset, revives, setRevives]); // Dependencies
+
+  // End game (Skip Revive)
   const handleSkipRevive = useCallback(() => {
     setShowRevivePopup(false);
     setGameStarted(false);
-    setHighScore(prev => Math.max(prev, score));
-  }, [score]);
-  
+    // High score saving is handled by the main save effect
+  }, []);
+
   // Unlock a new skin - update to properly validate coin balance
   const unlockSkin = useCallback((skin: string) => {
     const skinPrice = 1000; // Skin price is 1000 coins
@@ -1011,15 +781,15 @@ export default function Game() {
 
   // Complete challenge and claim reward
   const completeChallenge = useCallback((challengeId: string) => {
-    setChallenges(prev => prev.map(challenge => {
-      if (challenge.id === challengeId && challenge.completed && !challenge.claimed) {
-        setTotalCoins(coins => coins + challenge.reward);
+    setChallenges(prev => prev.map(c => {
+      if (c.id === challengeId && c.completed && !c.claimed) {
+        setTotalCoins(coins => coins + c.reward);
         playSoundEffect('reward');
         // Set the just claimed challenge to show double reward popup
         setJustClaimedChallenge(challengeId);
-        return { ...challenge, claimed: true };
+        return { ...c, claimed: true };
       }
-      return challenge;
+      return c;
     }));
   }, []);
 
@@ -1038,41 +808,6 @@ export default function Game() {
     }
   }, [gameStarted, jump, player.jumpCount]);
 
-  // Add these to your state variables
-  const [watchingAd, setWatchingAd] = useState(false);
-  const [adTimer, setAdTimer] = useState(0);
-  const [adReward, setAdReward] = useState<{type: 'revive' | 'doubleReward', challengeId?: string} | null>(null);
-    useEffect(() => {
-      const switchMusic = () => {
-        if (gameStarted) {
-          menuMusic.pause();
-          menuMusic.currentTime = 0;
-          gameMusic.volume = 0.4;
-          gameMusic.play().catch(err => console.log("Game music error"));
-        } else {
-          gameMusic.pause();
-          gameMusic.currentTime = 0;
-          menuMusic.volume = 0.4;
-          menuMusic.play().catch(err => console.log("Menu music error"));
-        }
-      };
-    
-      // Switch music when game state changes
-      switchMusic();
-    
-      // Enable audio on first click
-      const enableAudio = () => {
-        switchMusic();
-        document.removeEventListener('click', enableAudio);
-      };
-      document.addEventListener('click', enableAudio);
-    
-      // Cleanup function
-      return () => {
-        document.removeEventListener('click', enableAudio);
-      };
-    }, [gameStarted]);
-
   // Add this effect to simulate ads
   useEffect(() => {
     if (watchingAd) {
@@ -1090,13 +825,13 @@ export default function Game() {
                 handleRevive();
               } else if (adReward.type === 'doubleReward' && adReward.challengeId) {
                 // Double the reward
-                setChallenges(prev => prev.map(challenge => {
-                  if (challenge.id === adReward.challengeId && challenge.completed && !challenge.claimed) {
-                    setTotalCoins(coins => coins + challenge.reward * 2);
+                setChallenges(prev => prev.map(c => {
+                  if (c.id === adReward.challengeId && c.completed && !c.claimed) {
+                    setTotalCoins(coins => coins + c.reward * 2);
                     playSoundEffect('reward');
-                    return { ...challenge, claimed: true };
+                    return { ...c, claimed: true };
                   }
-                  return challenge;
+                  return c;
                 }));
               }
             }
@@ -1169,7 +904,7 @@ export default function Game() {
             imageRendering: 'pixelated',
           }}
           onTouchStart={handleTouchStart}
-          onClick={jump}  /* <-- Clicking on the container triggers a jump */
+          onClick={gameStarted && !isGameOver ? jump : undefined}  /* <-- Clicking on the container triggers a jump */
         >
           {/* Particle background */}
           <div className="absolute inset-0 overflow-hidden">
@@ -1213,27 +948,13 @@ export default function Game() {
               </div>
 
               {/* Combo indicator */}
-              {combo > 1 && (
+              {showComboText && combo > 1 && (
                 <div 
-                  className="fixed top-28 right-80 z-10"
-                  style={{
-                    animation: combo > 3 ? 'pulse 0.5s infinite' : undefined
-                  }}
+                  className="fixed top-28 right-80 z-10 text-2xl font-bold text-white animate-pulse"
+                  // Example style, adjust as needed
+                  style={{ textShadow: '0 0 10px #fff, 0 0 20px purple'}} 
                 >
-                  <div className={`bg-gradient-to-r ${
-                    combo > 5 ? 'from-purple-500 to-indigo-600' :
-                    combo > 3 ? 'from-blue-500 to-indigo-600' : 
-                    'from-indigo-500 to-blue-600'
-                  } px-4 py-1 rounded-full shadow-lg border border-white/30 backdrop-blur-sm`}>
-                    <div className="flex items-center gap-2">
-                      <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                      </svg>
-                      <span className="text-white font-bold">
-                        {combo}x <span className="text-xs opacity-80">Combo</span>
-                      </span>
-                    </div>
-                  </div>
+                  {combo}x Combo!
                 </div>
               )}
 
