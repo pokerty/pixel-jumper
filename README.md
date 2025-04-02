@@ -1,6 +1,7 @@
 # Pixel Jumper
 
 A retro-themed endless runner game built with React and TypeScript. Jump across procedurally generated platforms, collect coins, avoid falling, and unlock cool skins!
+![pixel-jumper](https://github.com/user-attachments/assets/d8d33f77-73e3-4ad4-b39c-3b524fe1e699)
 
 ## Features
 
@@ -82,9 +83,7 @@ This command builds the app for production to the `dist` folder.
 *   Leaderboards (requires a backend).
 
 ## Contributing
-
-_(Optional: Add guidelines here if you plan to accept contributions)_
+Pokerty
 
 ## License
-
-_(Optional: Specify a license, e.g., MIT License)_
+None
